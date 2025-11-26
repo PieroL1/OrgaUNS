@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "194065774732",
+    "project_id": "orgauns",
+    "storage_bucket": "orgauns.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:194065774732:android:26652d036d1489e05223a9",
+        "android_client_info": {
+          "package_name": "com.example.orgauns"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB06nVlpYZzxvI_F8CZB_RLq3Az7Sk5iEk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
