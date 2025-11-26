@@ -12,10 +12,19 @@ import com.example.orgauns.data.repository.AuthRepositoryImpl
 import com.example.orgauns.data.repository.SettingsRepositoryImpl
 import com.example.orgauns.presentation.navigation.AppNavigation
 import com.example.orgauns.ui.theme.OrgaUNSTheme
+import com.example.orgauns.utils.NotificationHelper
+import com.example.orgauns.service.TaskSyncService
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Crear canales de notificación
+        NotificationHelper.createNotificationChannels(this)
+
+        // Programar sincronización periódica
+        TaskSyncService.schedulePeriodicSync(this)
+
         setContent {
             OrgaUNSApp()
         }

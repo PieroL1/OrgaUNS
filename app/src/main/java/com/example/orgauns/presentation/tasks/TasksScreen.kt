@@ -20,10 +20,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.orgauns.domain.model.Task
+import com.example.orgauns.utils.AlarmScheduler
+import com.example.orgauns.utils.NotificationHelper
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -33,9 +36,9 @@ import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TasksScreen(
-    viewModel: TasksViewModel = viewModel()
-) {
+fun TasksScreen() {
+    val context = LocalContext.current
+    val viewModel: TasksViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsState()
     var showDialog by remember { mutableStateOf(false) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
@@ -252,6 +255,21 @@ fun TasksScreen(
                 onDismiss = { showDialog = false },
                 onCreate = { task ->
                     viewModel.createTask(task)
+
+                    // Programar alarma si tiene fecha/hora futura
+                    task.dueAt?.let { dueTime ->
+                        if (dueTime > System.currentTimeMillis()) {
+                            NotificationHelper.createNotificationChannels(context)
+                            AlarmScheduler.scheduleTaskReminder(
+                                context = context,
+                                taskId = task.id,
+                                taskTitle = task.title,
+                                taskDescription = task.description.takeIf { it.isNotEmpty() },
+                                triggerTime = dueTime
+                            )
+                        }
+                    }
+
                     showDialog = false
                 }
             )

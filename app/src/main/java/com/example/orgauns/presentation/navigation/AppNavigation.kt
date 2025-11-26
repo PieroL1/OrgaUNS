@@ -10,6 +10,7 @@ import com.example.orgauns.presentation.auth.LoginScreen
 import com.example.orgauns.presentation.auth.RegisterScreen
 import com.example.orgauns.presentation.main.MainScreen
 import com.example.orgauns.presentation.splash.SplashScreen
+import com.example.orgauns.presentation.settings.ContentProviderTestScreen
 
 @Composable
 fun AppNavigation(
@@ -76,6 +77,18 @@ fun AppNavigation(
                     navController.navigate(Route.Auth.route) {
                         popUpTo(0) { inclusive = true }
                     }
+                },
+                onNavigateToContentProviderTest = {
+                    navController.navigate(Route.ContentProviderTest.route)
+                }
+            )
+        }
+
+        // ContentProvider Test Screen
+        composable(Route.ContentProviderTest.route) {
+            ContentProviderTestScreen(
+                onBack = {
+                    navController.popBackStack()
                 }
             )
         }

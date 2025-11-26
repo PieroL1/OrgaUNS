@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Simple Agenda</string>
+    <string name="widget_description">Muestra tus tareas pendientes</string>
 </resources>

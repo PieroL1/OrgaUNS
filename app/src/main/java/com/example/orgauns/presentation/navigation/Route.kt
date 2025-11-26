@@ -16,6 +16,7 @@ sealed class Route(val route: String) {
     data object Notes : Route("notes")
     data object Map : Route("map")
     data object Settings : Route("settings")
+    data object ContentProviderTest : Route("content_provider_test")
 
     // Details/Edit
     data object TaskDetail : Route("task_detail/{taskId}") {

@@ -28,7 +28,10 @@ sealed class BottomNavItem(val route: String, val icon: ImageVector, val label: 
 }
 
 @Composable
-fun MainScreen(onLogout: () -> Unit) {
+fun MainScreen(
+    onLogout: () -> Unit,
+    onNavigateToContentProviderTest: () -> Unit = {}
+) {
     val navController = rememberNavController()
     val items = listOf(BottomNavItem.Tasks, BottomNavItem.Calendar, BottomNavItem.Notes, BottomNavItem.Map, BottomNavItem.Settings)
     var selectedItem by remember { mutableStateOf(0) }
@@ -77,7 +80,12 @@ fun MainScreen(onLogout: () -> Unit) {
             composable(Route.Calendar.route) { CalendarScreen() }
             composable(Route.Notes.route) { NotesScreen() }
             composable(Route.Map.route) { MapScreen() }
-            composable(Route.Settings.route) { SettingsScreen(onLogout = onLogout) }
+            composable(Route.Settings.route) {
+                SettingsScreen(
+                    onLogout = onLogout,
+                    onNavigateToContentProviderTest = onNavigateToContentProviderTest
+                )
+            }
         }
     }
 }
