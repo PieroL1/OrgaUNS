@@ -18,11 +18,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.orgauns.domain.model.Task
+import com.example.orgauns.utils.AlarmScheduler
+import com.example.orgauns.utils.NotificationHelper
+import android.content.Intent
+import android.provider.CalendarContract
 import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.util.*
@@ -32,7 +37,13 @@ import java.util.*
 fun CalendarScreen(
     viewModel: CalendarViewModel = viewModel()
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+
+    // Estados para editar y eliminar
+    var taskToEdit by remember { mutableStateOf<Task?>(null) }
+    var taskToDelete by remember { mutableStateOf<Task?>(null) }
+
     val tasksForSelectedDate = remember(uiState.selectedDate, uiState.tasks) {
         viewModel.getTasksForSelectedDate()
     }
@@ -135,11 +146,86 @@ fun CalendarScreen(
                     modifier = Modifier.fillMaxWidth().weight(1f)
                 ) {
                     items(items = tasksForSelectedDate, key = { it.id }) { task ->
-                        CompactTaskItem(task = task)
+                        CompactTaskItem(
+                            task = task,
+                            onToggleDone = { viewModel.toggleTaskDone(task) },
+                            onEdit = { taskToEdit = task },
+                            onDelete = { taskToDelete = task },
+                            onShareToCalendar = {
+                                val intent = Intent(Intent.ACTION_INSERT).apply {
+                                    data = CalendarContract.Events.CONTENT_URI
+                                    putExtra(CalendarContract.Events.TITLE, task.title)
+                                    putExtra(CalendarContract.Events.DESCRIPTION, task.description)
+                                    task.dueAt?.let { dueTime ->
+                                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, dueTime)
+                                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, dueTime + 3600000)
+                                    }
+                                }
+                                if (intent.resolveActivity(context.packageManager) != null) {
+                                    context.startActivity(intent)
+                                }
+                            }
+                        )
                     }
                 }
             }
         }
+    }
+
+    // Diálogo de edición (reutilizamos el de TasksScreen)
+    taskToEdit?.let { task ->
+        com.example.orgauns.presentation.tasks.EditTaskDialog(
+            task = task,
+            onDismiss = { taskToEdit = null },
+            onUpdate = { updatedTask ->
+                viewModel.updateTask(updatedTask)
+
+                // Actualizar alarma si tiene fecha/hora futura
+                updatedTask.dueAt?.let { dueTime ->
+                    if (dueTime > System.currentTimeMillis()) {
+                        NotificationHelper.createNotificationChannels(context)
+                        AlarmScheduler.scheduleTaskReminder(
+                            context = context,
+                            taskId = updatedTask.id,
+                            taskTitle = updatedTask.title,
+                            taskDescription = updatedTask.description.takeIf { it.isNotEmpty() },
+                            triggerTime = dueTime
+                        )
+                    }
+                }
+
+                taskToEdit = null
+            }
+        )
+    }
+
+    // Diálogo de confirmación para eliminar tarea
+    taskToDelete?.let { task ->
+        AlertDialog(
+            onDismissRequest = { taskToDelete = null },
+            title = { Text("Eliminar tarea") },
+            text = {
+                Text("¿Seguro que deseas eliminar la tarea \"${task.title}\"? Esta acción no se puede deshacer.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteTask(task.id)
+                        taskToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { taskToDelete = null }) {
+                    Text("Cancelar")
+                }
+            }
+        )
     }
 }
 
@@ -373,88 +459,144 @@ fun DayCell(
 }
 
 @Composable
-fun CompactTaskItem(task: Task) {
+fun CompactTaskItem(
+    task: Task,
+    onToggleDone: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onShareToCalendar: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 3.dp,
-            pressedElevation = 6.dp
-        ),
-        shape = MaterialTheme.shapes.large, // Esquinas más redondeadas
+            .padding(vertical = 4.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
-            containerColor = if (task.done)
-                MaterialTheme.colorScheme.surfaceVariant
-            else
-                MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(12.dp)
         ) {
-            // Indicador de prioridad (barra lateral mejorada)
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .height(36.dp)
-                    .background(
-                        color = when (task.priority) {
-                            3 -> Color(0xFFD32F2F) // Rojo suave
-                            2 -> Color(0xFFFFA726) // Amarillo/Naranja
-                            else -> MaterialTheme.colorScheme.primary // Verde
-                        },
-                        shape = MaterialTheme.shapes.small
-                    )
-            )
+            // Primera fila: Checkbox + Título + Prioridad
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = task.done,
+                    onCheckedChange = { onToggleDone() },
+                    modifier = Modifier.size(40.dp)
+                )
 
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = task.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = if (task.done)
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         else
-                            MaterialTheme.colorScheme.onSurface
+                            MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2
                     )
+                }
 
-                    if (task.done) {
-                        Spacer(modifier = Modifier.width(6.dp))
+                // Badge de prioridad
+                val (priorityText, priorityColor) = when (task.priority) {
+                    3 -> "Alta" to MaterialTheme.colorScheme.error
+                    2 -> "Media" to MaterialTheme.colorScheme.tertiary
+                    else -> "Baja" to MaterialTheme.colorScheme.secondary
+                }
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = priorityColor.copy(alpha = 0.2f),
+                    modifier = Modifier.padding(start = 4.dp)
+                ) {
+                    Text(
+                        text = priorityText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = priorityColor,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // Descripción (si existe)
+            if (task.description.isNotEmpty()) {
+                Text(
+                    text = task.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 40.dp, top = 2.dp),
+                    maxLines = 2
+                )
+            }
+
+            // Fecha y botones
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 40.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Fecha de vencimiento
+                task.dueAt?.let { dueDate ->
+                    val dateFormat = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault())
+                    Text(
+                        text = "📅 ${dateFormat.format(Date(dueDate))}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Botones de acción en fila horizontal
+                Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
+                    // Botón compartir a Calendar (solo si tiene fecha)
+                    if (task.dueAt != null) {
+                        IconButton(
+                            onClick = onShareToCalendar,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Event,
+                                contentDescription = "Compartir a Calendar",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Botón editar
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(36.dp)
+                    ) {
                         Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = "Completada",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            Icons.Default.Edit,
+                            contentDescription = "Editar",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
-                }
 
-                if (task.description.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = task.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
-                }
-
-                task.dueAt?.let { dueAt ->
-                    Spacer(modifier = Modifier.height(4.dp))
-                    val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-                    Text(
-                        text = timeFormat.format(Date(dueAt)),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
-                    )
+                    // Botón eliminar
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Eliminar",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }

@@ -62,6 +62,9 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    // Estado para forzar actualización de la info de sincronización
+    var lastSyncRefresh by remember { mutableStateOf(0L) }
+
     // Launcher para pedir permiso
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -265,7 +268,8 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val syncInfo = TaskSyncService.getLastSyncInfo(context)
+                    // Obtener info de sincronización (se actualiza cuando cambia lastSyncRefresh)
+                    val syncInfo = remember(lastSyncRefresh) { TaskSyncService.getLastSyncInfo(context) }
                     if (syncInfo.timestamp > 0) {
                         Text(
                             "Última sincronización: ${syncInfo.getTimeAgo()}",
@@ -284,6 +288,11 @@ fun SettingsScreen(
                         onClick = {
                             checkAndRequestPermission {
                                 TaskSyncService.syncNow(context)
+                                // Forzar actualización de la UI después de 1 segundo
+                                scope.launch {
+                                    kotlinx.coroutines.delay(1000)
+                                    lastSyncRefresh = System.currentTimeMillis()
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth()

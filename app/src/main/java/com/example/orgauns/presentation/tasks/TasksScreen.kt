@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +29,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.orgauns.domain.model.Task
 import com.example.orgauns.utils.AlarmScheduler
 import com.example.orgauns.utils.NotificationHelper
+import android.content.Intent
+import android.provider.CalendarContract
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -41,6 +45,7 @@ fun TasksScreen() {
     val viewModel: TasksViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsState()
     var showDialog by remember { mutableStateOf(false) }
+    var taskToEdit by remember { mutableStateOf<Task?>(null) } // Para editar
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
@@ -240,7 +245,23 @@ fun TasksScreen() {
                                     TaskItem(
                                         task = task,
                                         onToggleDone = { viewModel.toggleTaskDone(task) },
-                                        onDelete = { taskToDelete = task }
+                                        onEdit = { taskToEdit = task },
+                                        onDelete = { taskToDelete = task },
+                                        onShareToCalendar = {
+                                            // Compartir a Google Calendar
+                                            val intent = Intent(Intent.ACTION_INSERT).apply {
+                                                data = CalendarContract.Events.CONTENT_URI
+                                                putExtra(CalendarContract.Events.TITLE, task.title)
+                                                putExtra(CalendarContract.Events.DESCRIPTION, task.description)
+                                                task.dueAt?.let { dueTime ->
+                                                    putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, dueTime)
+                                                    putExtra(CalendarContract.EXTRA_EVENT_END_TIME, dueTime + 3600000) // +1 hora
+                                                }
+                                            }
+                                            if (intent.resolveActivity(context.packageManager) != null) {
+                                                context.startActivity(intent)
+                                            }
+                                        }
                                     )
                                 }
                             }
@@ -271,6 +292,33 @@ fun TasksScreen() {
                     }
 
                     showDialog = false
+                }
+            )
+        }
+
+        // Diálogo de edición
+        taskToEdit?.let { task ->
+            EditTaskDialog(
+                task = task,
+                onDismiss = { taskToEdit = null },
+                onUpdate = { updatedTask ->
+                    viewModel.updateTask(updatedTask)
+
+                    // Actualizar alarma si tiene fecha/hora futura
+                    updatedTask.dueAt?.let { dueTime ->
+                        if (dueTime > System.currentTimeMillis()) {
+                            NotificationHelper.createNotificationChannels(context)
+                            AlarmScheduler.scheduleTaskReminder(
+                                context = context,
+                                taskId = updatedTask.id,
+                                taskTitle = updatedTask.title,
+                                taskDescription = updatedTask.description.takeIf { it.isNotEmpty() },
+                                triggerTime = dueTime
+                            )
+                        }
+                    }
+
+                    taskToEdit = null
                 }
             )
         }
@@ -307,73 +355,145 @@ fun TasksScreen() {
 }
 
 @Composable
-fun TaskItem(task: Task, onToggleDone: () -> Unit, onDelete: () -> Unit) {
+fun TaskItem(
+    task: Task,
+    onToggleDone: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onShareToCalendar: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 3.dp,
-            pressedElevation = 6.dp
-        ),
-        shape = MaterialTheme.shapes.large, // Esquinas más redondeadas (16dp)
+            .padding(vertical = 4.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(12.dp)
         ) {
-            Checkbox(checked = task.done, onCheckedChange = { onToggleDone() })
-            Spacer(modifier = Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (task.done)
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                    else
-                        MaterialTheme.colorScheme.onSurface
+            // Primera fila: Checkbox + Título + Prioridad
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = task.done,
+                    onCheckedChange = { onToggleDone() },
+                    modifier = Modifier.size(40.dp)
                 )
-                if (task.description.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = task.description,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = task.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (task.done)
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        else
+                            MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2
                     )
                 }
-                task.dueAt?.let { dueDate ->
-                    Spacer(modifier = Modifier.height(4.dp))
-                    val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+
+                // Badge de prioridad
+                val (priorityText, priorityColor) = when (task.priority) {
+                    3 -> "Alta" to MaterialTheme.colorScheme.error
+                    2 -> "Media" to MaterialTheme.colorScheme.tertiary
+                    else -> "Baja" to MaterialTheme.colorScheme.secondary
+                }
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = priorityColor.copy(alpha = 0.2f),
+                    modifier = Modifier.padding(start = 4.dp)
+                ) {
                     Text(
-                        text = "Vence: ${dateFormat.format(Date(dueDate))}",
-                        style = MaterialTheme.typography.bodySmall,
+                        text = priorityText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = priorityColor,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // Descripción (si existe)
+            if (task.description.isNotEmpty()) {
+                Text(
+                    text = task.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 40.dp, top = 2.dp),
+                    maxLines = 2
+                )
+            }
+
+            // Fecha y botones
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 40.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Fecha de vencimiento
+                task.dueAt?.let { dueDate ->
+                    val dateFormat = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault())
+                    Text(
+                        text = "📅 ${dateFormat.format(Date(dueDate))}",
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                val priorityText = when (task.priority) {
-                    3 -> "Alta"
-                    2 -> "Media"
-                    else -> "Baja"
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Botones de acción en fila horizontal
+                Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
+                    // Botón compartir a Calendar (solo si tiene fecha)
+                    if (task.dueAt != null) {
+                        IconButton(
+                            onClick = onShareToCalendar,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Event,
+                                contentDescription = "Compartir a Calendar",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Botón editar
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Editar",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Botón eliminar
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Eliminar",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
-                val priorityColor = when (task.priority) {
-                    3 -> MaterialTheme.colorScheme.error
-                    2 -> MaterialTheme.colorScheme.tertiary
-                    else -> MaterialTheme.colorScheme.secondary
-                }
-                Text(
-                    text = "Prioridad: $priorityText",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = priorityColor
-                )
-            }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -520,6 +640,223 @@ fun CreateTaskDialog(onDismiss: () -> Unit, onCreate: (Task) -> Unit) {
                 enabled = title.isNotBlank()
             ) {
                 Text("Crear")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        }
+    )
+
+    // DatePickerDialog
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedDateMillis = datePickerState.selectedDateMillis
+                    showDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancelar")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    // TimePickerDialog
+    if (showTimePicker) {
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedHour = timePickerState.hour
+                    selectedMinute = timePickerState.minute
+                    showTimePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) {
+                    Text("Cancelar")
+                }
+            },
+            text = {
+                TimePicker(state = timePickerState)
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditTaskDialog(task: Task, onDismiss: () -> Unit, onUpdate: (Task) -> Unit) {
+    var title by remember { mutableStateOf(task.title) }
+    var description by remember { mutableStateOf(task.description) }
+    var priority by remember { mutableStateOf(task.priority) }
+
+    // Extraer fecha y hora de la tarea existente
+    var selectedDateMillis by remember {
+        mutableStateOf(task.dueAt?.let { dueTime ->
+            // Convertir timestamp a medianoche UTC para el DatePicker
+            val localDate = Instant.ofEpochMilli(dueTime)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+            localDate.atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli()
+        })
+    }
+
+    var selectedHour by remember {
+        mutableStateOf(task.dueAt?.let { dueTime ->
+            Instant.ofEpochMilli(dueTime)
+                .atZone(ZoneId.systemDefault())
+                .hour
+        })
+    }
+
+    var selectedMinute by remember {
+        mutableStateOf(task.dueAt?.let { dueTime ->
+            Instant.ofEpochMilli(dueTime)
+                .atZone(ZoneId.systemDefault())
+                .minute
+        })
+    }
+
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    val datePickerState = rememberDatePickerState()
+    val timePickerState = rememberTimePickerState()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Editar Tarea") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Título") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Descripción") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 3
+                )
+
+                Text("Prioridad", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = priority == 1, onClick = { priority = 1 }, label = { Text("Baja") })
+                    FilterChip(selected = priority == 2, onClick = { priority = 2 }, label = { Text("Media") })
+                    FilterChip(selected = priority == 3, onClick = { priority = 3 }, label = { Text("Alta") })
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+                Text("Fecha y hora de vencimiento (opcional)", style = MaterialTheme.typography.labelMedium)
+
+                // Botón para seleccionar fecha
+                OutlinedButton(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        if (selectedDateMillis != null) {
+                            val localDate = Instant.ofEpochMilli(selectedDateMillis!!)
+                                .atZone(ZoneId.of("UTC"))
+                                .toLocalDate()
+                            val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                            dateFormat.format(Date.from(localDate.atStartOfDay(ZoneId.systemDefault()).toInstant()))
+                        } else {
+                            "Seleccionar fecha"
+                        }
+                    )
+                }
+
+                // Botón para seleccionar hora (solo si ya se seleccionó fecha)
+                if (selectedDateMillis != null) {
+                    OutlinedButton(
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (selectedHour != null && selectedMinute != null) {
+                                String.format("%02d:%02d", selectedHour, selectedMinute)
+                            } else {
+                                "Seleccionar hora (opcional)"
+                            }
+                        )
+                    }
+                }
+
+                // Botón para limpiar fecha/hora
+                if (selectedDateMillis != null) {
+                    TextButton(
+                        onClick = {
+                            selectedDateMillis = null
+                            selectedHour = null
+                            selectedMinute = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Quitar fecha/hora")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        val dueAt = selectedDateMillis?.let { dateMillis ->
+                            val localDate = Instant.ofEpochMilli(dateMillis)
+                                .atZone(ZoneId.of("UTC"))
+                                .toLocalDate()
+
+                            val localTime = if (selectedHour != null && selectedMinute != null) {
+                                LocalTime.of(selectedHour!!, selectedMinute!!, 0)
+                            } else {
+                                LocalTime.of(23, 59, 0)
+                            }
+
+                            localDate
+                                .atTime(localTime)
+                                .atZone(ZoneId.systemDefault())
+                                .toInstant()
+                                .toEpochMilli()
+                        }
+
+                        onUpdate(task.copy(
+                            title = title,
+                            description = description,
+                            priority = priority,
+                            dueAt = dueAt
+                        ))
+                    }
+                },
+                enabled = title.isNotBlank()
+            ) {
+                Text("Guardar")
             }
         },
         dismissButton = {

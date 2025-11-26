@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.orgauns.data.repository.TaskRepositoryImpl
 import com.example.orgauns.domain.model.Task
-import com.example.orgauns.domain.usecase.GetTasksUseCase
+import com.example.orgauns.domain.usecase.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -24,6 +24,9 @@ class CalendarViewModel(
 ) : ViewModel() {
 
     private val getTasksUseCase = GetTasksUseCase(taskRepository)
+    private val updateTaskUseCase = UpdateTaskUseCase(taskRepository)
+    private val deleteTaskUseCase = DeleteTaskUseCase(taskRepository)
+    private val toggleTaskDoneUseCase = ToggleTaskDoneUseCase(taskRepository)
 
     private val _uiState = MutableStateFlow(CalendarUiState())
     val uiState: StateFlow<CalendarUiState> = _uiState.asStateFlow()
@@ -108,6 +111,42 @@ class CalendarViewModel(
                 (date.isEqual(lastDay) || date.isBefore(lastDay))
             }
             .toSet()
+    }
+
+    /**
+     * Cambia el estado done de una tarea
+     */
+    fun toggleTaskDone(task: Task) {
+        viewModelScope.launch {
+            toggleTaskDoneUseCase(task)
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(error = e.message)
+                }
+        }
+    }
+
+    /**
+     * Actualiza una tarea
+     */
+    fun updateTask(task: Task) {
+        viewModelScope.launch {
+            updateTaskUseCase(task)
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(error = e.message)
+                }
+        }
+    }
+
+    /**
+     * Elimina una tarea
+     */
+    fun deleteTask(taskId: String) {
+        viewModelScope.launch {
+            deleteTaskUseCase(taskId)
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(error = e.message)
+                }
+        }
     }
 }
 
